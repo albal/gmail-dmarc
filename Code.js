@@ -38,8 +38,9 @@ function buildReportCard(reportData) {
     .setContent('<font color="' + ratingColor + '"><b>' + rating + '</b></font>')
     .setButton(CardService.newTextButton()
       .setText('Details')
-      .setOpenLink(CardService.newOpenLink()
-        .setUrl('https://dmarcian.com/dmarc-inspector/?domain=' + reportData.domain))));
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('onShowDetails')
+        .setParameters({reportData: JSON.stringify(reportData)}))));
 
   // Summary stats
   section.addWidget(CardService.newKeyValue()
@@ -79,7 +80,122 @@ function buildReportCard(reportData) {
   card.addSection(section);
   card.addSection(policySection);
   
+  // Add a fixed footer with a "Back" button for navigation
+  card.setFixedFooter(CardService.newFixedFooter()
+    .setPrimaryButton(CardService.newTextButton()
+      .setText('Back')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('onNavigateBack'))));
+
   return card.build();
+}
+
+/**
+ * Build a detailed card with full DMARC report data, styled like the example image.
+ * @param {Object} reportData - Parsed DMARC report data
+ * @return {Card} The detailed report card
+ */
+function buildDetailsCard(reportData) {
+  var card = CardService.newCardBuilder();
+  card.setHeader(CardService.newCardHeader()
+    .setTitle('Report Analysis')
+    .setSubtitle(reportData.domain + ' from ' + reportData.orgName));
+
+  // Top Summary Section
+  var summarySection = CardService.newCardSection();
+  summarySection.addWidget(CardService.newKeyValue()
+    .setTopLabel('Overall Status')
+    .setContent('Good') // This is static for now, can be dynamic later
+    .setIcon(CardService.Icon.CONFIRMATION));
+    
+  summarySection.addWidget(CardService.newKeyValue()
+    .setTopLabel('Report Period')
+    .setContent(new Date(reportData.beginDate).toLocaleDateString() + ' to ' + new Date(reportData.endDate).toLocaleDateString()));
+  
+  card.addSection(summarySection);
+
+  // Detailed Records Header
+  var recordsHeaderSection = CardService.newCardSection()
+    .setHeader('All Email Records');
+  recordsHeaderSection.addWidget(CardService.newTextParagraph()
+    .setText('Complete breakdown of each source that sent emails on your behalf.'));
+  card.addSection(recordsHeaderSection);
+
+  // Add a section for each detailed record
+  if (reportData.records && reportData.records.length > 0) {
+    reportData.records.forEach(function(record) {
+      var recordSection = CardService.newCardSection();
+      
+      recordSection.addWidget(CardService.newKeyValue()
+        .setTopLabel('Source IP')
+        .setContent(record.sourceIp + (record.sourceHost ? ' (' + record.sourceHost + ')' : '')));
+
+      recordSection.addWidget(CardService.newKeyValue()
+        .setTopLabel('Header From')
+        .setContent(record.headerFrom));
+        
+      recordSection.addWidget(CardService.newKeyValue()
+        .setTopLabel('Email Count')
+        .setContent(record.count.toString()));
+
+      recordSection.addWidget(CardService.newKeyValue()
+        .setTopLabel('Disposition')
+        .setContent(formatResult(record.disposition)));
+
+      recordSection.addWidget(CardService.newKeyValue()
+        .setTopLabel('SPF Result')
+        .setContent(formatResult(record.spfResult, record.spfDomain)));
+
+      recordSection.addWidget(CardService.newKeyValue()
+        .setTopLabel('DKIM Result')
+        .setContent(formatResult(record.dkimResult, record.dkimDomain)));
+        
+      card.addSection(recordSection);
+    });
+  } else {
+    card.addSection(CardService.newCardSection()
+      .addWidget(CardService.newTextParagraph().setText('No individual records found in the report.')));
+  }
+
+  // Add a back button to the footer
+  card.setFixedFooter(CardService.newFixedFooter()
+    .setPrimaryButton(CardService.newTextButton()
+      .setText('Back to Summary')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('onNavigateToRoot'))));
+
+  return card.build();
+}
+
+/**
+ * Formats a DMARC result (SPF, DKIM, Disposition) with color coding.
+ * @param {string} result - The result string (e.g., 'pass', 'fail', 'none').
+ * @param {string} [domain] - The domain associated with the result.
+ * @return {string} An HTML formatted string.
+ */
+function formatResult(result, domain) {
+  var color = '#000000'; // Default black
+  var text = result.charAt(0).toUpperCase() + result.slice(1);
+  
+  switch(result.toLowerCase()) {
+    case 'pass':
+      color = '#38761d'; // Green
+      break;
+    case 'fail':
+      color = '#cc0000'; // Red
+      break;
+    case 'none':
+    case 'neutral':
+    case 'softfail':
+      color = '#f1c232'; // Yellow/Orange
+      break;
+  }
+  
+  var content = '<font color="' + color + '"><b>' + text + '</b></font>';
+  if (domain) {
+    content += ' (' + domain + ')';
+  }
+  return content;
 }
 
 /**
@@ -331,29 +447,49 @@ function parseXml(xmlContent) {
     var dkimPass = 0;
     var spfPass = 0;
     var sourceIps = {};
+    var detailedRecords = [];
     
     for (var i = 0; i < records.length; i++) {
       var record = records[i];
       var row = record.getChild('row');
+      var identifiers = record.getChild('identifiers');
+      var authResults = record.getChild('auth_results');
       var policyEvaluated = row.getChild('policy_evaluated');
       var count = parseInt(getElementText(row, 'count')) || 0;
       
       totalMessages += count;
       
-      // Check DMARC result
+      // DMARC results
       var disposition = getElementText(policyEvaluated, 'disposition');
-      var dkim = getElementText(policyEvaluated, 'dkim');
-      var spf = getElementText(policyEvaluated, 'spf');
+      var dkimResult = getElementText(policyEvaluated, 'dkim');
+      var spfResult = getElementText(policyEvaluated, 'spf');
       
-      if (dkim === 'pass') dkimPass += count;
-      if (spf === 'pass') spfPass += count;
-      if (dkim === 'pass' || spf === 'pass') passedMessages += count;
+      // Auth results for domains
+      var spfAuth = authResults.getChild('spf');
+      var dkimAuth = authResults.getChild('dkim');
+
+      if (dkimResult === 'pass') dkimPass += count;
+      if (spfResult === 'pass') spfPass += count;
+      if (dkimResult === 'pass' || spfResult === 'pass') passedMessages += count;
       
       // Track source IPs
       var sourceIp = getElementText(row, 'source_ip');
       if (sourceIp) {
         sourceIps[sourceIp] = (sourceIps[sourceIp] || 0) + count;
       }
+
+      // Store detailed record for the new view
+      detailedRecords.push({
+        sourceIp: sourceIp,
+        sourceHost: getElementText(row, 'source_ip_reverse_dns'), // Assuming reverse DNS might be available
+        headerFrom: getElementText(identifiers, 'header_from'),
+        count: count,
+        disposition: disposition,
+        spfResult: getElementText(spfAuth, 'result'),
+        spfDomain: getElementText(spfAuth, 'domain'),
+        dkimResult: getElementText(dkimAuth, 'result'),
+        dkimDomain: getElementText(dkimAuth, 'domain')
+      });
     }
     
     // Calculate percentages
@@ -389,7 +525,8 @@ function parseXml(xmlContent) {
       adkim: adkim,
       aspf: aspf,
       topSources: topSources,
-      recordCount: records.length
+      recordCount: records.length,
+      records: detailedRecords // Add detailed records to the data object
     };
     
   } catch (error) {
@@ -423,6 +560,36 @@ function determineRating(passRate) {
   if (passRate >= 90) return 'GOOD';
   if (passRate >= 70) return 'WARNING';
   return 'BAD';
+}
+
+// ==================================================================
+// Action Handlers & Navigation
+// ==================================================================
+
+/**
+ * Action handler for the "Details" button.
+ * Pushes a new card with detailed information.
+ * @param {Object} e - Event object containing parameters
+ * @return {ActionResponse} The response to navigate to the details card
+ */
+function onShowDetails(e) {
+  Logger.log('onShowDetails triggered');
+  var reportData = JSON.parse(e.parameters.reportData);
+  var detailsCard = buildDetailsCard(reportData);
+  
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().pushCard(detailsCard))
+    .build();
+}
+
+/**
+ * Action handler to navigate back to the root card.
+ * @return {ActionResponse} The response to pop to the root
+ */
+function onNavigateToRoot() {
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().popToRoot())
+    .build();
 }
 
 // ==================================================================
