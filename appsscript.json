@@ -9,7 +9,7 @@
   ],
   "gmail": {
     "name": "DMARC Report Analyzer",
-    "logoUrl": "https://www.gstatic.com/images/branding/product/1x/gmail_96dp.png",
+    "logoUrl": "https://www.gstatic.com/images/icons/material/system/1x/security_white_24dp.png",
     "contextualTriggers": [
       {
         "unconditional": {},
