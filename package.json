@@ -1,0 +1,27 @@
+{
+  "name": "dmarc-gmail-addon",
+  "version": "1.0.0",
+  "description": "Gmail add-on to decode and analyze DMARC reports from email attachments",
+  "main": "src/Code.js",
+  "scripts": {
+    "login": "clasp login",
+    "setup": "clasp create --type standalone --title 'DMARC Report Analyzer'",
+    "push": "clasp push",
+    "deploy": "clasp deploy",
+    "open": "clasp open",
+    "logs": "clasp logs"
+  },
+  "keywords": [
+    "gmail",
+    "addon",
+    "dmarc",
+    "email",
+    "security"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@google/clasp": "^2.4.2",
+    "@types/google-apps-script": "^1.0.83"
+  }
+}

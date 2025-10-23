@@ -1,0 +1,9 @@
+**/**
+!src/**/*.js
+!appsscript.json
+node_modules/**
+.git/**
+README.md
+package.json
+package-lock.json
+.clasp.json
